@@ -24,12 +24,6 @@ public sealed class PLZASeedFinderPlugin : IPlugin
     {
         Console.WriteLine($"Loading {Name}...");
 
-        // Enable SearchShiny1 globally for Shiny Alpha Pokemon seed correlation
-        // This is required for PKHeX to validate Shiny Alpha Pokemon (RollCount=1)
-        // Without this, sysbot and other tools using PKHeX will reject them as invalid
-        LumioseSolver.SearchShiny1 = true;
-        Console.WriteLine($"[{Name}] Enabled LumioseSolver.SearchShiny1 for Shiny Alpha validation");
-
         // Check version compatibility
         if (PluginVersion.HasVersionMismatch())
             Console.WriteLine($"[{Name}] {PluginVersion.GetCompatibilityMessage()}");

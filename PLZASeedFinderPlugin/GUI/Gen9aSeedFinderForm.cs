@@ -1668,11 +1668,11 @@ public partial class Gen9aSeedFinderForm : Form
         if (result == null)
             return;
 
+        // Save the current SearchShiny1 state at the start
+        bool wasSearchShiny1Enabled = LumioseSolver.SearchShiny1;
+
         try
         {
-            // Save the current SearchShiny1 state
-            bool wasSearchShiny1Enabled = LumioseSolver.SearchShiny1;
-
             // Temporarily disable SearchShiny1 since we already generated this Pokémon with the correct seed
             // This skips the expensive PID+ correlation validation (up to 131,072 operations)
             // Making loading nearly instantaneous
@@ -1686,17 +1686,16 @@ public partial class Gen9aSeedFinderForm : Form
 
             // Wait a moment for PKHeX to complete validation with SearchShiny1 disabled
             await Task.Delay(100);
-
-            // Restore the original SearchShiny1 state
-            // This ensures other validations still work properly
-            LumioseSolver.SearchShiny1 = wasSearchShiny1Enabled;
         }
         catch (Exception ex)
         {
             WinFormsUtil.Error($"Failed to load Pokémon: {ex.Message}");
-
-            // Ensure we restore SearchShiny1 even if there's an error
-            LumioseSolver.SearchShiny1 = true;
+        }
+        finally
+        {
+            // Restore the original SearchShiny1 state
+            // This ensures other validations still work properly
+            LumioseSolver.SearchShiny1 = wasSearchShiny1Enabled;
         }
     }
 
