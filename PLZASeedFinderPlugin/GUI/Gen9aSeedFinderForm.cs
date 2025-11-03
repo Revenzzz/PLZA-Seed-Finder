@@ -1670,7 +1670,7 @@ public partial class Gen9aSeedFinderForm : Form
 
     /// <summary>
     /// Handles double-click events on the results grid to load Pokémon into the editor.
-    /// Temporarily disables SearchShiny1 to speed up loading since we already know the Pokémon is valid.
+    /// Temporarily enables SearchShiny1 during load for proper validation, then disables it to prevent PKHeX slowdown.
     /// </summary>
     private async void ResultsGrid_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
     {
@@ -1681,15 +1681,11 @@ public partial class Gen9aSeedFinderForm : Form
         if (result == null)
             return;
 
-        // Save the current SearchShiny1 state at the start
-        bool wasSearchShiny1Enabled = LumioseSolver.SearchShiny1;
-
         try
         {
-            // Temporarily disable SearchShiny1 since we already generated this Pokémon with the correct seed
-            // This skips the expensive PID+ correlation validation (up to 131,072 operations)
-            // Making loading nearly instantaneous
-            LumioseSolver.SearchShiny1 = false;
+            // Enable SearchShiny1 temporarily so PKHeX validates the Pokemon correctly
+            // This is especially important for Shiny Alphas which need PID+ correlation validation
+            LumioseSolver.SearchShiny1 = true;
 
             // Load the Pokémon into PKHeX editor
             _pkmEditor.PopulateFields(result.Pokemon);
@@ -1697,8 +1693,8 @@ public partial class Gen9aSeedFinderForm : Form
             var wrapper = new EncounterWrapper(result.Encounter, GameVersion.ZA);
             WinFormsUtil.Alert($"Loaded {result.Pokemon.Nickname}!\nSeed: {result.Seed:X16}\nEncounter: {wrapper.GetDescription()}");
 
-            // Wait a moment for PKHeX to complete validation with SearchShiny1 disabled
-            await Task.Delay(100);
+            // Wait for PKHeX to complete validation
+            await Task.Delay(500);
         }
         catch (Exception ex)
         {
@@ -1706,9 +1702,9 @@ public partial class Gen9aSeedFinderForm : Form
         }
         finally
         {
-            // Restore the original SearchShiny1 state
-            // This ensures other validations still work properly
-            LumioseSolver.SearchShiny1 = wasSearchShiny1Enabled;
+            // Always disable SearchShiny1 after loading to prevent PKHeX from slowing down
+            // when validating boxes (it would run expensive PID+ checks on every Pokemon)
+            LumioseSolver.SearchShiny1 = false;
         }
     }
 
