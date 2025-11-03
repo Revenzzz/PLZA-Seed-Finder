@@ -1687,6 +1687,9 @@ public partial class Gen9aSeedFinderForm : Form
             // This is especially important for Shiny Alphas which need PID+ correlation validation
             LumioseSolver.SearchShiny1 = true;
 
+            // Small delay to ensure PKHeX recognizes the SearchShiny1 setting change
+            await Task.Delay(50);
+
             // Load the Pokémon into PKHeX editor
             _pkmEditor.PopulateFields(result.Pokemon);
 
