@@ -27,11 +27,51 @@ jobs:
           $version = [System.Reflection.Assembly]::LoadFrom((Resolve-Path $dll)).GetName().Version
           $versionString = "$($version.Major).$($version.Minor).$($version.Build)"
           echo "version=$versionString" >> $env:GITHUB_OUTPUT
+      - name: Determine release tag
+        id: tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+
+          # Get all tags for this version (v1.2.3, v1.2.3-Rev.1, etc.)
+          $tags = gh release list --limit 1000 --json tagName --jq '.[].tagName' | ConvertFrom-Json
+
+          # Find tags matching this version
+          $matchingTags = $tags | Where-Object { $_ -match "^v$version(-Rev\.(\d+))?$" }
+
+          if ($matchingTags.Count -eq 0) {
+            # No existing release for this version
+            $tag = "v$version"
+            $name = "PLZA Seed Finder $version"
+          } else {
+            # Find the highest revision number
+            $maxRev = 0
+            foreach ($tag in $matchingTags) {
+              if ($tag -match "^v$version-Rev\.(\d+)$") {
+                $rev = [int]$matches[1]
+                if ($rev -gt $maxRev) {
+                  $maxRev = $rev
+                }
+              } elseif ($tag -eq "v$version") {
+                $maxRev = [Math]::Max($maxRev, 0)
+              }
+            }
+
+            # Increment revision
+            $newRev = $maxRev + 1
+            $tag = "v$version-Rev.$newRev"
+            $name = "PLZA Seed Finder $version Rev. $newRev"
+          }
+
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "name=$name" >> $env:GITHUB_OUTPUT
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "v${{ steps.ver.outputs.version }}"
-          name: "PLZA Seed Finder ${{ steps.ver.outputs.version }}"
-          body: "Automated release for version ${{ steps.ver.outputs.version }}"
+          tag_name: "${{ steps.tag.outputs.tag }}"
+          name: "${{ steps.tag.outputs.name }}"
+          body: "Automated release for ${{ steps.tag.outputs.name }}"
           files: |
             PLZASeedFinderPlugin/bin/Release/net9.0-windows/PLZASeedFinderPlugin.dll
