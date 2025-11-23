@@ -50,6 +50,8 @@ namespace PLZASeedFinderPlugin.GUI
             this.tidNum = new System.Windows.Forms.NumericUpDown();
             this.sidLabel = new System.Windows.Forms.Label();
             this.sidNum = new System.Windows.Forms.NumericUpDown();
+            this.trainerNameLabel = new System.Windows.Forms.Label();
+            this.trainerNameText = new System.Windows.Forms.TextBox();
             this.genderLabel = new System.Windows.Forms.Label();
             this.genderCombo = new System.Windows.Forms.ComboBox();
             this.abilityLabel = new System.Windows.Forms.Label();
@@ -326,6 +328,8 @@ namespace PLZASeedFinderPlugin.GUI
             this.encounterCombo.TabIndex = 1;
 
             // criteriaGroup
+            this.criteriaGroup.Controls.Add(this.trainerNameText);
+            this.criteriaGroup.Controls.Add(this.trainerNameLabel);
             this.criteriaGroup.Controls.Add(this.sidNum);
             this.criteriaGroup.Controls.Add(this.sidLabel);
             this.criteriaGroup.Controls.Add(this.tidNum);
@@ -340,7 +344,7 @@ namespace PLZASeedFinderPlugin.GUI
             this.criteriaGroup.Controls.Add(this.genderLabel);
             this.criteriaGroup.Location = new System.Drawing.Point(8, 271);
             this.criteriaGroup.Name = "criteriaGroup";
-            this.criteriaGroup.Size = new System.Drawing.Size(360, 115);
+            this.criteriaGroup.Size = new System.Drawing.Size(360, 145);
             this.criteriaGroup.TabIndex = 3;
             this.criteriaGroup.TabStop = false;
             this.criteriaGroup.Text = "Search Criteria";
@@ -459,6 +463,22 @@ namespace PLZASeedFinderPlugin.GUI
             this.sidNum.Size = new System.Drawing.Size(110, 23);
             this.sidNum.TabIndex = 11;
 
+            // trainerNameLabel
+            this.trainerNameLabel.AutoSize = true;
+            this.trainerNameLabel.Location = new System.Drawing.Point(10, 115);
+            this.trainerNameLabel.Name = "trainerNameLabel";
+            this.trainerNameLabel.Size = new System.Drawing.Size(25, 15);
+            this.trainerNameLabel.TabIndex = 12;
+            this.trainerNameLabel.Text = "OT:";
+
+            // trainerNameText
+            this.trainerNameText.Location = new System.Drawing.Point(80, 112);
+            this.trainerNameText.Name = "trainerNameText";
+            this.trainerNameText.ReadOnly = true;
+            this.trainerNameText.Size = new System.Drawing.Size(270, 23);
+            this.trainerNameText.TabIndex = 13;
+            this.trainerNameText.BackColor = System.Drawing.SystemColors.Control;
+
             // ivGroup
             this.ivGroup.Controls.Add(this.ivMaxLabel);
             this.ivGroup.Controls.Add(this.ivMinLabel);
@@ -482,7 +502,7 @@ namespace PLZASeedFinderPlugin.GUI
             this.ivGroup.Controls.Add(this.ivHpMax);
             this.ivGroup.Controls.Add(this.ivHpMin);
             this.ivGroup.Controls.Add(this.ivHpLabel);
-            this.ivGroup.Location = new System.Drawing.Point(8, 392);
+            this.ivGroup.Location = new System.Drawing.Point(8, 422);
             this.ivGroup.Name = "ivGroup";
             this.ivGroup.Size = new System.Drawing.Size(360, 140);
             this.ivGroup.TabIndex = 4;
@@ -668,7 +688,7 @@ namespace PLZASeedFinderPlugin.GUI
             this.searchOptionsGroup.Controls.Add(this.startSeedLabel);
             this.searchOptionsGroup.Controls.Add(this.maxSeedsNum);
             this.searchOptionsGroup.Controls.Add(this.maxSeedsLabel);
-            this.searchOptionsGroup.Location = new System.Drawing.Point(8, 538);
+            this.searchOptionsGroup.Location = new System.Drawing.Point(8, 568);
             this.searchOptionsGroup.Name = "searchOptionsGroup";
             this.searchOptionsGroup.Size = new System.Drawing.Size(360, 150);
             this.searchOptionsGroup.TabIndex = 5;
@@ -943,5 +963,7 @@ namespace PLZASeedFinderPlugin.GUI
         private System.Windows.Forms.NumericUpDown tidNum;
         private System.Windows.Forms.Label sidLabel;
         private System.Windows.Forms.NumericUpDown sidNum;
+        private System.Windows.Forms.Label trainerNameLabel;
+        private System.Windows.Forms.TextBox trainerNameText;
     }
 }

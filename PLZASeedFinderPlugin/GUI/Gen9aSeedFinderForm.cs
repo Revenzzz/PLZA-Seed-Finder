@@ -68,6 +68,17 @@ public partial class Gen9aSeedFinderForm : Form
 
         // Cancel search when form is closing
         FormClosing += OnFormClosing;
+
+        // Refresh trainer data when form is shown (after PKHeX has loaded save)
+        Shown += OnFormShown;
+    }
+
+    /// <summary>
+    /// Handles form shown event to refresh trainer data from save file.
+    /// </summary>
+    private void OnFormShown(object? sender, EventArgs e)
+    {
+        RefreshTrainerData();
     }
 
     /// <summary>
@@ -432,11 +443,36 @@ public partial class Gen9aSeedFinderForm : Form
     private void LoadTrainerData()
     {
         var sav = _saveFileEditor.SAV;
+
+        // Check if we have a valid save file loaded
+        if (sav == null)
+            return;
+
         // PLZA uses the Gen 7+ display format (6-digit TID, 4-digit SID)
         // Convert from internal 16-bit values to display format
         uint id32 = ((uint)sav.SID16 << 16) | sav.TID16;
-        tidNum.Value = id32 % 1000000; // TID7 (0-999999)
-        sidNum.Value = id32 / 1000000; // SID7 (0-4294)
+
+        // Only update if we have non-zero IDs (indicating a real save file)
+        if (id32 != 0)
+        {
+            tidNum.Value = id32 % 1000000; // TID7 (0-999999)
+            sidNum.Value = id32 / 1000000; // SID7 (0-4294)
+        }
+
+        // Load trainer name
+        if (!string.IsNullOrWhiteSpace(sav.OT))
+        {
+            trainerNameText.Text = sav.OT;
+        }
+    }
+
+    /// <summary>
+    /// Refreshes trainer data from the current save file.
+    /// Called when the form is shown or save file changes.
+    /// </summary>
+    private void RefreshTrainerData()
+    {
+        LoadTrainerData();
     }
 
     /// <summary>
