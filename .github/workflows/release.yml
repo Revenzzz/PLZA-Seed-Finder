@@ -36,7 +36,7 @@ jobs:
           $version = "${{ steps.ver.outputs.version }}"
 
           # Get all tags for this version (v1.2.3, v1.2.3-Rev.1, etc.)
-          $tags = gh release list --limit 1000 --json tagName --jq '.[].tagName' | ConvertFrom-Json
+          $tags = gh release list --limit 1000 --json tagName --jq '.[].tagName'
 
           # Find tags matching this version
           $matchingTags = $tags | Where-Object { $_ -match "^v$version(-Rev\.(\d+))?$" }
