@@ -1236,30 +1236,30 @@ public partial class Gen9aSeedFinderForm : Form
         if (param.GenderRatio == 0 && encounter is not EncounterTrade9a)
             return false;
 
-        // Only override SizeType for non-Alpha encounters
-        // Alpha encounters must use SizeType.VALUE with Scale=255
-        var isAlpha = encounter switch
-        {
-            EncounterSlot9a slot => slot.IsAlpha,
-            EncounterStatic9a static9a => static9a.IsAlpha,
-            EncounterGift9a gift => gift.IsAlpha,
-            _ => false
-        };
-
-        if (!isAlpha)
+        // Only override SizeType if the encounter doesn't have a fixed scale
+        // - Alpha encounters use SizeType.VALUE with Scale=255
+        // - Static encounters may have fixed scales (e.g., Mewtwo has Scale=128)
+        // - Only override if the encounter's GetParams returned SizeType.RANDOM
+        // Checking param.SizeType handles both cases: Alphas and fixed-scale statics both have VALUE
+        if (param.SizeType != SizeType9.VALUE)
         {
             param = param with { SizeType = sizeType };
         }
 
         // For PA9, we create a temporary Pokémon and use LumioseRNG to verify
         // This is more reliable than trying to replicate complex PA9 RNG logic
-        var pk = new PA9 { Species = encounter switch {
-            EncounterSlot9a s => s.Species,
-            EncounterStatic9a s => s.Species,
-            EncounterGift9a g => g.Species,
-            EncounterTrade9a t => t.Species,
-            _ => 0
-        }};
+        // IMPORTANT: Must set ID32 because GetAdaptedPID uses it for shiny calculations
+        // For Shiny.Never encounters, PID is XORed if it would be shiny with the trainer's ID
+        var pk = new PA9 {
+            Species = encounter switch {
+                EncounterSlot9a s => s.Species,
+                EncounterStatic9a s => s.Species,
+                EncounterGift9a g => g.Species,
+                EncounterTrade9a t => t.Species,
+                _ => 0
+            },
+            ID32 = tr.ID32
+        };
 
         if (pk.Species == 0)
             return false;
@@ -1639,17 +1639,11 @@ public partial class Gen9aSeedFinderForm : Form
                 _ => default
             };
 
-            // Only override SizeType for non-Alpha encounters
-            // Alpha encounters must use SizeType.VALUE with Scale=255
-            var isAlpha = encounter switch
-            {
-                EncounterSlot9a slot => slot.IsAlpha,
-                EncounterStatic9a static9a => static9a.IsAlpha,
-                EncounterGift9a gift => gift.IsAlpha,
-                _ => false
-            };
-
-            if (!isAlpha)
+            // Only override SizeType if the encounter doesn't have a fixed scale
+            // - Alpha encounters use SizeType.VALUE with Scale=255
+            // - Static encounters may have fixed scales (e.g., Mewtwo has Scale=128)
+            // - Only override if the encounter's GetParams returned SizeType.RANDOM
+            if (param.SizeType != SizeType9.VALUE)
             {
                 param = param with { SizeType = sizeType };
             }
