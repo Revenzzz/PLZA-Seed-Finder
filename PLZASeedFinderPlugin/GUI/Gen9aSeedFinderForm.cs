@@ -1061,6 +1061,73 @@ public partial class Gen9aSeedFinderForm : Form
     }
 
     /// <summary>
+    /// Gets only the DIRECT (single-step) evolutions from a source species.
+    /// Unlike GetEvolutions, this does NOT include multi-stage evolutions.
+    /// For example, Mankey only returns Primeape, NOT Annihilape.
+    /// </summary>
+    private static List<(ushort Species, byte Form)> GetDirectEvolutions(ushort sourceSpecies, byte sourceForm)
+    {
+        var evos = new List<(ushort Species, byte Form)>();
+
+        var forward = _evoTree.Forward.GetForward(sourceSpecies, sourceForm);
+        foreach (var evo in forward.Span)
+        {
+            if (evo.Species != 0)
+            {
+                var evoForm = evo.GetDestinationForm(sourceForm);
+                evos.Add((evo.Species, evoForm));
+            }
+        }
+
+        return evos;
+    }
+
+    /// <summary>
+    /// Gets the evolution path from source species to target species.
+    /// Returns a list of (species, form, minLevel) tuples representing each evolution stage.
+    /// For example, Mankey → Annihilape returns [(Primeape, 0, 28), (Annihilape, 0, 0)]
+    /// </summary>
+    private static List<(ushort Species, byte Form, byte MinLevel)> GetEvolutionPath(ushort sourceSpecies, byte sourceForm, ushort targetSpecies, byte targetForm)
+    {
+        var path = new List<(ushort Species, byte Form, byte MinLevel)>();
+
+        // BFS to find the evolution path
+        var queue = new Queue<(ushort Species, byte Form, List<(ushort, byte, byte)> Path)>();
+        queue.Enqueue((sourceSpecies, sourceForm, []));
+        var visited = new HashSet<(ushort, byte)> { (sourceSpecies, sourceForm) };
+
+        while (queue.Count > 0)
+        {
+            var (currentSpecies, currentForm, currentPath) = queue.Dequeue();
+
+            var forward = _evoTree.Forward.GetForward(currentSpecies, currentForm);
+            foreach (var evo in forward.Span)
+            {
+                if (evo.Species == 0)
+                    continue;
+
+                var evoForm = evo.GetDestinationForm(currentForm);
+                // Get the minimum level required for this evolution
+                var minLevel = evo.Level; // Evolution level requirement
+                var newPath = new List<(ushort, byte, byte)>(currentPath) { (evo.Species, evoForm, minLevel) };
+
+                if (evo.Species == targetSpecies && evoForm == targetForm)
+                {
+                    return newPath; // Found the target
+                }
+
+                if (!visited.Contains((evo.Species, evoForm)))
+                {
+                    visited.Add((evo.Species, evoForm));
+                    queue.Enqueue((evo.Species, evoForm, newPath));
+                }
+            }
+        }
+
+        return path; // Empty if no path found
+    }
+
+    /// <summary>
     /// Gets all evolved species that can be obtained from Z-A encounters.
     /// </summary>
     /// <returns>Dictionary mapping evolved species to their base encounter species</returns>
@@ -1088,7 +1155,8 @@ public partial class Gen9aSeedFinderForm : Form
         foreach (var enc in Encounters9a.Trades)
             baseSpecies.Add((enc.Species, enc.Form));
 
-        // For each base species, find all evolutions
+        // For each base species, find ALL evolutions (including multi-stage)
+        // Multi-stage evolutions (e.g., Mankey → Primeape → Annihilape) are supported
         foreach (var (species, form) in baseSpecies)
         {
             var evolutions = GetEvolutions(species, form);
@@ -1125,8 +1193,31 @@ public partial class Gen9aSeedFinderForm : Form
             (ushort)Species.Runerigus when preEvoSpecies == (ushort)Species.Yamask => 49,
             // Overqwil from Qwilfish-Hisui needs FormArgument = 20
             (ushort)Species.Overqwil when preEvoSpecies == (ushort)Species.Qwilfish => 20,
+            // Annihilape from Primeape needs FormArgument = 20 (Rage Fist usage counter)
+            (ushort)Species.Annihilape when preEvoSpecies == (ushort)Species.Primeape => 20,
             // Gholdengo from Gimmighoul - Z-A sets this to 0
             (ushort)Species.Gholdengo when preEvoSpecies == (ushort)Species.Gimmighoul => 0,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Gets the minimum level required for a species that evolved via move knowledge.
+    /// PKHeX validates that move-evolution species could have known the required move,
+    /// which depends on the level at which the pre-evolution learns that move.
+    /// </summary>
+    /// <param name="species">Target species</param>
+    /// <returns>Minimum level required, or 0 if not a move evolution</returns>
+    private static byte GetMinLevelForMoveEvolution(ushort species)
+    {
+        return species switch
+        {
+            // Annihilape: Primeape learns Rage Fist at level 35 in Z-A
+            (ushort)Species.Annihilape => 35,
+            // Overqwil: Qwilfish-Hisui learns Barb Barrage at level 28 in Z-A
+            (ushort)Species.Overqwil => 28,
+            // Wyrdeer: Stantler learns Psyshield Bash at level 31 in Z-A
+            (ushort)Species.Wyrdeer => 31,
             _ => 0
         };
     }
@@ -1137,12 +1228,24 @@ public partial class Gen9aSeedFinderForm : Form
     /// <param name="pk">Source Pokemon to evolve</param>
     /// <param name="targetSpecies">Target species</param>
     /// <param name="targetForm">Target form</param>
-    /// <param name="preEvoSpecies">Pre-evolution species (for form argument calculation)</param>
+    /// <param name="preEvoSpecies">Pre-evolution species (immediate, for form argument calculation)</param>
+    /// <param name="originalEncounterSpecies">Original encounter species (for alpha move validation)</param>
+    /// <param name="originalEncounterForm">Original encounter form</param>
     /// <returns>Evolved Pokemon, or null if evolution failed</returns>
-    private static PA9? EvolvePokemon(PA9 pk, ushort targetSpecies, byte targetForm, ushort preEvoSpecies)
+    private static PA9? EvolvePokemon(PA9 pk, ushort targetSpecies, byte targetForm, ushort preEvoSpecies,
+        ushort originalEncounterSpecies = 0, byte originalEncounterForm = 0)
     {
         // MINIMAL EVOLUTION: Only change what's absolutely necessary
         // Keep pre-evolution's moves so PKHeX can trace the evolution chain
+
+        // Store pre-evolution alpha status
+        // PKHeX validates alpha move based on ORIGINAL ENCOUNTER species, not intermediate evolutions
+        var wasAlpha = pk.IsAlpha;
+
+        // Use original encounter if provided, otherwise fall back to immediate pre-evolution
+        var encounterSpeciesForAlpha = originalEncounterSpecies != 0 ? originalEncounterSpecies : preEvoSpecies;
+        var encounterFormForAlpha = originalEncounterSpecies != 0 ? originalEncounterForm : pk.Form;
+        var encounterPi = wasAlpha ? (PersonalInfo9ZA)PersonalTable.ZA[encounterSpeciesForAlpha, encounterFormForAlpha] : null;
 
         // Update species and form
         pk.Species = targetSpecies;
@@ -1167,14 +1270,32 @@ public partial class Gen9aSeedFinderForm : Form
         // Update base friendship for evolved species
         pk.OriginalTrainerFriendship = pi.BaseFriendship;
 
-        // DO NOT change moves - keep pre-evolution's moves
-        // PKHeX validates evolved Pokemon by tracing back to the pre-evolution encounter
+        // Ensure CurrentLevel meets move-evolution requirements
+        // Some species require knowing a specific move to have evolved (e.g., Annihilape needs Rage Fist at level 35)
+        // PKHeX validates that the Pokemon could have known the move, which requires sufficient level
+        var minMoveLevel = GetMinLevelForMoveEvolution(targetSpecies);
+        if (minMoveLevel > 0 && pk.CurrentLevel < minMoveLevel)
+        {
+            pk.CurrentLevel = minMoveLevel;
+        }
 
-        // BUT DO update Plus flags for the evolved species
+        // Update Plus flags for the evolved species
         // Clear all flags first, then set based on evolved species' learnset
         var (_, plus) = LearnSource9ZA.GetLearnsetAndPlus(targetSpecies, targetForm);
         pk.ClearPlusFlags(pi.PlusCountTotal);
         PlusRecordApplicator.SetPlusFlagsEncounter(pk, pi, plus, pk.CurrentLevel);
+
+        // If the original encounter was alpha, ensure the ORIGINAL ENCOUNTER's alpha move Plus flag is set
+        // PKHeX validates based on enc.Species, enc.Form - the ORIGINAL encounter, not any intermediate
+        // This is critical for multi-stage evolutions (e.g., alpha Mankey → Primeape → Annihilape)
+        if (wasAlpha && encounterPi != null)
+        {
+            var encounterAlphaMove = encounterPi.AlphaMove;
+            if (encounterAlphaMove != 0)
+            {
+                PlusRecordApplicator.SetPlusFlagsSpecific(pk, pi, encounterAlphaMove);
+            }
+        }
 
         return pk;
     }
@@ -1903,27 +2024,20 @@ public partial class Gen9aSeedFinderForm : Form
             _ => false
         };
 
+        // Set Plus flags for encounter first (PKHeX does this before alpha move handling)
+        PlusRecordApplicator.SetPlusFlagsEncounter(pk, pi, plus, encounter.LevelMin);
+
         if (!isAlpha)
         {
             learn.SetEncounterMoves(encounter.LevelMin, moves);
-            PlusRecordApplicator.SetPlusFlagsEncounter(pk, pi, plus, encounter.LevelMin);
         }
         else
         {
             // Alpha Pokemon get their signature move as the first move
+            // Match PKHeX's order: SetPlusFlagsEncounter, then set alpha move with SetPlusFlagsSpecific
             learn.SetEncounterMovesBackwards(encounter.LevelMin, moves, sameDescend: false);
-            moves[0] = pi.AlphaMove;
-            pk.SetMoves(moves);
-
-            // Set Plus Move flag for the Alpha Move
-            var alphaMove = pi.AlphaMove;
-            var indexPlus = PersonalInfo9ZA.PlusMoves.IndexOf(alphaMove);
-            if (indexPlus != -1)
-                pk.SetMovePlusFlag(indexPlus);
-
-            // Set other Plus Move flags for encounter
-            PlusRecordApplicator.SetPlusFlagsEncounter(pk, pi, plus, encounter.LevelMin);
-            return;
+            if (pi.AlphaMove != 0)
+                PlusRecordApplicator.SetPlusFlagsSpecific(pk, pi, moves[0] = pi.AlphaMove);
         }
         pk.SetMoves(moves);
     }
@@ -2019,11 +2133,31 @@ public partial class Gen9aSeedFinderForm : Form
             }
             else
             {
-                // Evolve the Pokemon to the target species
-                var preEvoSpecies = pk8.Species;
-                pk8 = EvolvePokemon(pk8, targetEvolutionSpecies, targetEvolutionForm, preEvoSpecies);
-                if (pk8 == null)
-                    return null;
+                // Get the full evolution path from encounter species to target
+                // For multi-stage evolutions (e.g., Mankey → Primeape → Annihilape)
+                var originalEncounterSpecies = pk8.Species;
+                var originalEncounterForm = pk8.Form;
+                var evolutionPath = GetEvolutionPath(pk8.Species, pk8.Form, targetEvolutionSpecies, targetEvolutionForm);
+
+                if (evolutionPath.Count == 0)
+                    return null; // No valid evolution path
+
+                // Evolve through each stage, passing the ORIGINAL encounter info
+                // Each step includes MinLevel - the minimum level required for that evolution
+                foreach (var (evoSpecies, evoForm, minLevel) in evolutionPath)
+                {
+                    // Ensure CurrentLevel meets the evolution requirement
+                    // For example, Mankey → Primeape requires level 28
+                    if (pk8.CurrentLevel < minLevel)
+                    {
+                        pk8.CurrentLevel = minLevel;
+                    }
+
+                    var preEvoSpecies = pk8.Species;
+                    pk8 = EvolvePokemon(pk8, evoSpecies, evoForm, preEvoSpecies, originalEncounterSpecies, originalEncounterForm);
+                    if (pk8 == null)
+                        return null;
+                }
             }
 
             // Ensure stats are calculated
@@ -2226,6 +2360,35 @@ public partial class Gen9aSeedFinderForm : Form
         if (result == null)
             return;
 
+        // Show loading indicator
+        var previousCursor = Cursor;
+        Cursor = Cursors.WaitCursor;
+        resultsGrid.Enabled = false;
+
+        // Create and show a loading form
+        using var loadingForm = new Form
+        {
+            Text = "Please Wait",
+            Size = new Size(300, 100),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            ControlBox = false,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            TopMost = true
+        };
+        var loadingLabel = new Label
+        {
+            Text = "Generating Pokémon and running validators...",
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Dock = DockStyle.Fill
+        };
+        loadingForm.Controls.Add(loadingLabel);
+        loadingForm.Show(this);
+        loadingForm.Refresh();
+
         try
         {
             // Enable SearchShiny1 temporarily so PKHeX validates the Pokemon correctly
@@ -2238,14 +2401,18 @@ public partial class Gen9aSeedFinderForm : Form
             // Load the Pokémon into PKHeX editor
             _pkmEditor.PopulateFields(result.Pokemon);
 
-            var wrapper = new EncounterWrapper(result.Encounter, GameVersion.ZA);
-            WinFormsUtil.Alert($"Loaded {result.Pokemon.Nickname}!\nSeed: {result.Seed:X16}\nEncounter: {wrapper.GetDescription()}");
-
             // Wait for PKHeX to complete validation
             await Task.Delay(500);
+
+            // Close loading form before showing success message
+            loadingForm.Close();
+
+            var wrapper = new EncounterWrapper(result.Encounter, GameVersion.ZA);
+            WinFormsUtil.Alert($"Loaded {result.Pokemon.Nickname}!\nSeed: {result.Seed:X16}\nEncounter: {wrapper.GetDescription()}");
         }
         catch (Exception ex)
         {
+            loadingForm.Close();
             WinFormsUtil.Error($"Failed to load Pokémon: {ex.Message}");
         }
         finally
@@ -2253,6 +2420,10 @@ public partial class Gen9aSeedFinderForm : Form
             // Always disable SearchShiny1 after loading to prevent PKHeX from slowing down
             // when validating boxes (it would run expensive PID+ checks on every Pokemon)
             LumioseSolver.SearchShiny1 = false;
+
+            // Restore UI state
+            Cursor = previousCursor;
+            resultsGrid.Enabled = true;
         }
     }
 
