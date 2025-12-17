@@ -604,6 +604,11 @@ public partial class Gen9aSeedFinderForm : Form
     }
 
     /// <summary>
+    /// Cache for evolved species that can be obtained from Z-A encounters.
+    /// </summary>
+    private static Dictionary<(ushort Species, byte Form), List<(ushort BaseSpecies, byte BaseForm)>>? _evolvedSpeciesCache;
+
+    /// <summary>
     /// Loads the species list for PLZA Pokémon with encounters.
     /// </summary>
     private void LoadSpeciesList()
@@ -636,6 +641,13 @@ public partial class Gen9aSeedFinderForm : Form
         // Add trade encounter species
         foreach (var encounter in Encounters9a.Trades)
             validSpecies.Add(encounter.Species);
+
+        // Cache and add evolved species that can be obtained from base encounters
+        _evolvedSpeciesCache ??= GetAllEvolvableSpecies();
+        foreach (var (evoSpecies, _) in _evolvedSpeciesCache.Keys)
+        {
+            validSpecies.Add(evoSpecies);
+        }
 
         // Build combo items from valid species
         var species = new List<ComboItem>();
@@ -718,12 +730,38 @@ public partial class Gen9aSeedFinderForm : Form
         _availableSources = EncounterSource.None;
 
         var selectedSources = GetSelectedSources();
+        var targetForm = (byte)(formCombo.SelectedValue as int? ?? 0);
 
+        // Get direct encounters for this species
+        AddEncountersForSpecies((ushort)species, selectedSources, encounters, targetEvolutionSpecies: 0, targetEvolutionForm: 0);
+
+        // Check if this is an evolved species that needs pre-evolution encounters
+        _evolvedSpeciesCache ??= GetAllEvolvableSpecies();
+        var key = ((ushort)species, targetForm);
+        if (_evolvedSpeciesCache.TryGetValue(key, out var preEvolutions))
+        {
+            // Add encounters from all pre-evolutions
+            foreach (var (preEvoSpecies, preEvoForm) in preEvolutions)
+            {
+                AddEncountersForSpecies(preEvoSpecies, selectedSources, encounters,
+                    targetEvolutionSpecies: (ushort)species, targetEvolutionForm: targetForm);
+            }
+        }
+
+        _cachedEncounters = encounters;
+    }
+
+    /// <summary>
+    /// Adds encounters for a specific species to the encounter list.
+    /// </summary>
+    private void AddEncountersForSpecies(ushort species, EncounterSource selectedSources, List<EncounterWrapper> encounters,
+        ushort targetEvolutionSpecies, byte targetEvolutionForm)
+    {
         // Get wild encounters
         if (selectedSources.HasFlag(EncounterSource.Wild))
         {
-            var wildEncounters = GetWildEncounters((ushort)species, GameVersion.ZA);
-            encounters.AddRange(wildEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA)));
+            var wildEncounters = GetWildEncounters(species, GameVersion.ZA);
+            encounters.AddRange(wildEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA, targetEvolutionSpecies, targetEvolutionForm)));
             if (wildEncounters.Count > 0)
                 _availableSources |= EncounterSource.Wild;
         }
@@ -731,8 +769,8 @@ public partial class Gen9aSeedFinderForm : Form
         // Get static encounters
         if (selectedSources.HasFlag(EncounterSource.Static))
         {
-            var staticEncounters = GetStaticEncounters((ushort)species);
-            encounters.AddRange(staticEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA)));
+            var staticEncounters = GetStaticEncounters(species);
+            encounters.AddRange(staticEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA, targetEvolutionSpecies, targetEvolutionForm)));
             if (staticEncounters.Count > 0)
                 _availableSources |= EncounterSource.Static;
         }
@@ -740,8 +778,8 @@ public partial class Gen9aSeedFinderForm : Form
         // Get gift encounters
         if (selectedSources.HasFlag(EncounterSource.Gift))
         {
-            var giftEncounters = GetGiftEncounters((ushort)species, GameVersion.ZA);
-            encounters.AddRange(giftEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA)));
+            var giftEncounters = GetGiftEncounters(species, GameVersion.ZA);
+            encounters.AddRange(giftEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA, targetEvolutionSpecies, targetEvolutionForm)));
             if (giftEncounters.Count > 0)
                 _availableSources |= EncounterSource.Gift;
         }
@@ -749,13 +787,11 @@ public partial class Gen9aSeedFinderForm : Form
         // Get trade encounters
         if (selectedSources.HasFlag(EncounterSource.Trade))
         {
-            var tradeEncounters = GetTradeEncounters((ushort)species);
-            encounters.AddRange(tradeEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA)));
+            var tradeEncounters = GetTradeEncounters(species);
+            encounters.AddRange(tradeEncounters.Select(e => new EncounterWrapper(e, GameVersion.ZA, targetEvolutionSpecies, targetEvolutionForm)));
             if (tradeEncounters.Count > 0)
                 _availableSources |= EncounterSource.Trade;
         }
-
-        _cachedEncounters = encounters;
     }
 
     /// <summary>
@@ -901,6 +937,200 @@ public partial class Gen9aSeedFinderForm : Form
 
         return encounters;
     }
+
+    #region Evolution Helpers
+
+    /// <summary>
+    /// Cache for the Z-A evolution tree.
+    /// </summary>
+    private static readonly EvolutionTree _evoTree = EvolutionTree.GetEvolutionTree(EntityContext.Gen9a);
+
+    /// <summary>
+    /// Gets all species that can evolve into the target species in Z-A.
+    /// </summary>
+    /// <param name="targetSpecies">Target evolved species</param>
+    /// <param name="targetForm">Target form</param>
+    /// <returns>List of (preEvoSpecies, preEvoForm) tuples</returns>
+    private static List<(ushort Species, byte Form)> GetPreEvolutions(ushort targetSpecies, byte targetForm)
+    {
+        var preEvos = new List<(ushort Species, byte Form)>();
+
+        // Get the reverse (devolution) lookup - EvolutionNode has First and Second links
+        ref readonly var node = ref _evoTree.Reverse.GetReverse(targetSpecies, targetForm);
+
+        if (!node.First.IsEmpty)
+            preEvos.Add((node.First.Species, node.First.Form));
+        if (!node.Second.IsEmpty)
+            preEvos.Add((node.Second.Species, node.Second.Form));
+
+        return preEvos;
+    }
+
+    /// <summary>
+    /// Gets all species that can be evolved from the source species in Z-A.
+    /// </summary>
+    /// <param name="sourceSpecies">Source species</param>
+    /// <param name="sourceForm">Source form</param>
+    /// <returns>List of (evoSpecies, evoForm) tuples</returns>
+    private static List<(ushort Species, byte Form)> GetEvolutions(ushort sourceSpecies, byte sourceForm)
+    {
+        var evos = new List<(ushort Species, byte Form)>();
+
+        var forward = _evoTree.Forward.GetForward(sourceSpecies, sourceForm);
+        foreach (var evo in forward.Span)
+        {
+            if (evo.Species != 0)
+            {
+                // EvolutionMethod.Species is the target species, Form is determined by the method
+                var evoForm = evo.GetDestinationForm(sourceForm);
+                evos.Add((evo.Species, evoForm));
+                // Also get further evolutions (for 3-stage lines)
+                var furtherEvos = GetEvolutions(evo.Species, evoForm);
+                evos.AddRange(furtherEvos);
+            }
+        }
+
+        return evos;
+    }
+
+    /// <summary>
+    /// Gets all evolved species that can be obtained from Z-A encounters.
+    /// </summary>
+    /// <returns>Dictionary mapping evolved species to their base encounter species</returns>
+    private static Dictionary<(ushort Species, byte Form), List<(ushort BaseSpecies, byte BaseForm)>> GetAllEvolvableSpecies()
+    {
+        var result = new Dictionary<(ushort Species, byte Form), List<(ushort BaseSpecies, byte BaseForm)>>();
+
+        // Collect all base encounter species
+        var baseSpecies = new HashSet<(ushort Species, byte Form)>();
+
+        foreach (var area in Encounters9a.Slots)
+            foreach (var slot in area.Slots)
+                baseSpecies.Add((slot.Species, slot.Form));
+
+        foreach (var area in Encounters9a.Hyperspace)
+            foreach (var slot in area.Slots)
+                baseSpecies.Add((slot.Species, slot.Form));
+
+        foreach (var enc in Encounters9a.Static)
+            baseSpecies.Add((enc.Species, enc.Form));
+
+        foreach (var enc in Encounters9a.Gifts)
+            baseSpecies.Add((enc.Species, enc.Form));
+
+        foreach (var enc in Encounters9a.Trades)
+            baseSpecies.Add((enc.Species, enc.Form));
+
+        // For each base species, find all evolutions
+        foreach (var (species, form) in baseSpecies)
+        {
+            var evolutions = GetEvolutions(species, form);
+            foreach (var (evoSpecies, evoForm) in evolutions)
+            {
+                // Skip if the evolved form is also directly encounterable
+                if (baseSpecies.Contains((evoSpecies, evoForm)))
+                    continue;
+
+                var key = (evoSpecies, evoForm);
+                if (!result.ContainsKey(key))
+                    result[key] = [];
+                result[key].Add((species, form));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Gets the form argument required for a specific species evolution in Z-A.
+    /// </summary>
+    /// <param name="species">Target species</param>
+    /// <param name="preEvoSpecies">Pre-evolution species</param>
+    /// <returns>Required form argument value</returns>
+    private static uint GetRequiredFormArgument(ushort species, ushort preEvoSpecies)
+    {
+        // Z-A specific form argument requirements
+        return species switch
+        {
+            // Sirfetch'd evolved from Farfetch'd-Galar needs FormArgument >= 3
+            (ushort)Species.Sirfetchd when preEvoSpecies == (ushort)Species.Farfetchd => 3,
+            // Runerigus from Yamask needs FormArgument = 49
+            (ushort)Species.Runerigus when preEvoSpecies == (ushort)Species.Yamask => 49,
+            // Overqwil from Qwilfish-Hisui needs FormArgument = 20
+            (ushort)Species.Overqwil when preEvoSpecies == (ushort)Species.Qwilfish => 20,
+            // Gholdengo from Gimmighoul - Z-A sets this to 0
+            (ushort)Species.Gholdengo when preEvoSpecies == (ushort)Species.Gimmighoul => 0,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Evolves a Pokemon to the target species and sets up required properties.
+    /// </summary>
+    /// <param name="pk">Source Pokemon to evolve</param>
+    /// <param name="targetSpecies">Target species</param>
+    /// <param name="targetForm">Target form</param>
+    /// <param name="preEvoSpecies">Pre-evolution species (for form argument calculation)</param>
+    /// <returns>Evolved Pokemon, or null if evolution failed</returns>
+    private static PA9? EvolvePokemon(PA9 pk, ushort targetSpecies, byte targetForm, ushort preEvoSpecies)
+    {
+        // Store original values we need to preserve
+        var originalLevel = pk.CurrentLevel;
+
+        // Update species and form
+        pk.Species = targetSpecies;
+        pk.Form = targetForm;
+
+        // Get personal info for the evolved species
+        var pi = PersonalTable.ZA[targetSpecies, targetForm];
+
+        // Update nickname to evolved species name (if not nicknamed)
+        if (!pk.IsNicknamed)
+        {
+            pk.Nickname = SpeciesName.GetSpeciesNameGeneration(targetSpecies, pk.Language, 9);
+        }
+
+        // Set form argument if required for this evolution
+        var requiredFormArg = GetRequiredFormArgument(targetSpecies, preEvoSpecies);
+        if (requiredFormArg > 0)
+        {
+            pk.ChangeFormArgument(requiredFormArg);
+        }
+
+        // Ensure level is appropriate (at least at evolution level, but maintain original if higher)
+        // For seed finder, we typically want the base encounter level, so keep original
+        pk.CurrentLevel = originalLevel;
+
+        // Update moves for evolved species
+        var (learn, plus) = LearnSource9ZA.GetLearnsetAndPlus(targetSpecies, targetForm);
+        Span<ushort> moves = stackalloc ushort[4];
+
+        // Check if Alpha - preserve alpha status and move
+        if (pk.IsAlpha)
+        {
+            learn.SetEncounterMovesBackwards(originalLevel, moves, sameDescend: false);
+            moves[0] = pi.AlphaMove;
+            pk.SetMoves(moves);
+        }
+        else
+        {
+            learn.SetEncounterMoves(originalLevel, moves);
+            pk.SetMoves(moves);
+        }
+
+        // Update Plus move flags
+        PlusRecordApplicator.SetPlusFlagsEncounter(pk, pi, plus, originalLevel);
+
+        // Update base friendship for evolved species
+        pk.OriginalTrainerFriendship = pi.BaseFriendship;
+
+        // Heal PP for new moves
+        pk.HealPP();
+
+        return pk;
+    }
+
+    #endregion
 
     /// <summary>
     /// Handles the search button click event to start or stop seed searching.
@@ -1215,7 +1445,9 @@ public partial class Gen9aSeedFinderForm : Form
                             continue;
 
                         // Only generate full Pokemon for valid seeds
-                        var pk = TryGeneratePokemon(wrapper.Encounter, currentSeed, criteria, sizeType, tr, form);
+                        // Pass evolution info if this is an evolution encounter
+                        var pk = TryGeneratePokemon(wrapper.Encounter, currentSeed, criteria, sizeType, tr, form,
+                            wrapper.TargetEvolutionSpecies, wrapper.TargetEvolutionForm);
                         if (pk == null)
                             continue;
 
@@ -1656,8 +1888,11 @@ public partial class Gen9aSeedFinderForm : Form
     /// <param name="criteria">Generation criteria</param>
     /// <param name="tr">Trainer information</param>
     /// <param name="desiredForm">Desired form</param>
+    /// <param name="targetEvolutionSpecies">Target species to evolve into (0 if no evolution)</param>
+    /// <param name="targetEvolutionForm">Target form after evolution</param>
     /// <returns>Generated PA9 if successful, null otherwise</returns>
-    private PA9? TryGeneratePokemon(object encounter, ulong seed, EncounterCriteria criteria, SizeType9 sizeType, ITrainerInfo tr, byte desiredForm)
+    private PA9? TryGeneratePokemon(object encounter, ulong seed, EncounterCriteria criteria, SizeType9 sizeType, ITrainerInfo tr, byte desiredForm,
+        ushort targetEvolutionSpecies = 0, byte targetEvolutionForm = 0)
     {
         try
         {
@@ -1725,9 +1960,21 @@ public partial class Gen9aSeedFinderForm : Form
                 _ => (byte)0
             };
 
-            if (baseForm < EncounterUtil.FormDynamic && pk8.Form != desiredForm)
+            // For non-evolution encounters, check form matches
+            if (targetEvolutionSpecies == 0)
             {
-                return null;
+                if (baseForm < EncounterUtil.FormDynamic && pk8.Form != desiredForm)
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                // Evolve the Pokemon to the target species
+                var preEvoSpecies = pk8.Species;
+                pk8 = EvolvePokemon(pk8, targetEvolutionSpecies, targetEvolutionForm, preEvoSpecies);
+                if (pk8 == null)
+                    return null;
             }
 
             // Ensure stats are calculated
@@ -2241,14 +2488,33 @@ public partial class Gen9aSeedFinderForm : Form
         public GameVersion Version { get; }
 
         /// <summary>
+        /// Target species to evolve into (0 if not an evolution encounter).
+        /// </summary>
+        public ushort TargetEvolutionSpecies { get; }
+
+        /// <summary>
+        /// Target form after evolution (0 for default).
+        /// </summary>
+        public byte TargetEvolutionForm { get; }
+
+        /// <summary>
+        /// Whether this encounter requires evolution to reach the target species.
+        /// </summary>
+        public bool IsEvolutionEncounter => TargetEvolutionSpecies != 0;
+
+        /// <summary>
         /// Initializes a new instance of the EncounterWrapper class.
         /// </summary>
         /// <param name="encounter">Encounter to wrap</param>
         /// <param name="version">Game version</param>
-        public EncounterWrapper(object encounter, GameVersion version)
+        /// <param name="targetEvolutionSpecies">Target species to evolve into (0 if not evolution)</param>
+        /// <param name="targetEvolutionForm">Target form after evolution</param>
+        public EncounterWrapper(object encounter, GameVersion version, ushort targetEvolutionSpecies = 0, byte targetEvolutionForm = 0)
         {
             Encounter = encounter;
             Version = version;
+            TargetEvolutionSpecies = targetEvolutionSpecies;
+            TargetEvolutionForm = targetEvolutionForm;
         }
 
         /// <summary>
@@ -2269,7 +2535,7 @@ public partial class Gen9aSeedFinderForm : Form
         /// <returns>Description string</returns>
         public string GetDescription()
         {
-            return Encounter switch
+            var baseDesc = Encounter switch
             {
                 EncounterSlot9a slot => $"{(slot.Type == SlotType9a.Hyperspace ? "Hyperspace" : "Wild")} - Lv.{slot.LevelMin}{(slot.LevelMax != slot.LevelMin ? $"-{slot.LevelMax}" : "")} {(slot.IsAlpha ? "(Alpha)" : "")}",
                 EncounterStatic9a static9a => $"Static - Lv.{static9a.Level} {(static9a.IsAlpha ? "(Alpha)" : "")}",
@@ -2277,6 +2543,19 @@ public partial class Gen9aSeedFinderForm : Form
                 EncounterTrade9a trade => $"Trade - Lv.{trade.Level}",
                 _ => "Unknown"
             };
+
+            if (IsEvolutionEncounter)
+            {
+                var preEvoSpecies = Encounter switch
+                {
+                    ISpeciesForm sf => sf.Species,
+                    _ => (ushort)0
+                };
+                var preEvoName = SpeciesName.GetSpeciesName(preEvoSpecies, (int)LanguageID.English);
+                return $"{baseDesc} (from {preEvoName})";
+            }
+
+            return baseDesc;
         }
 
         /// <summary>
