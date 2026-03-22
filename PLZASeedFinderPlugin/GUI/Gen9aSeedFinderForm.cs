@@ -1835,7 +1835,7 @@ public partial class Gen9aSeedFinderForm : Form
         if (criteria.Gender != Gender.Random && pk.Gender != (byte)criteria.Gender)
             return false;
 
-        if (criteria.Nature != Nature.Random && pk.Nature != criteria.Nature)
+        if (criteria.Nature.IsFixed() && pk.Nature != criteria.Nature)
             return false;
 
         if (criteria.Ability != AbilityPermission.Any12H)
@@ -1845,16 +1845,7 @@ public partial class Gen9aSeedFinderForm : Form
         }
 
         // Check shiny criteria
-        bool matchesShiny = criteria.Shiny switch
-        {
-            Shiny.Never => !pk.IsShiny,
-            Shiny.Always => pk.IsShiny,
-            Shiny.AlwaysSquare => pk.IsShiny && pk.ShinyXor == 0,
-            Shiny.AlwaysStar => pk.IsShiny && pk.ShinyXor > 0 && pk.ShinyXor < 16,
-            _ => true // Shiny.Random accepts any
-        };
-
-        if (!matchesShiny)
+        if (criteria.IsSpecifiedShiny() && !criteria.IsSatisfiedShiny(ShinyUtil.GetShinyXor(pk.PID, pk.ID32), 16))
             return false;
 
         // Check scale
@@ -2026,7 +2017,7 @@ public partial class Gen9aSeedFinderForm : Form
         if (encounter is IFixedGender fixedGender && fixedGender.Gender != FixedGenderUtil.GenderRandom)
             pk.Gender = fixedGender.Gender;
 
-        if (encounter is IFixedNature fixedNature && fixedNature.Nature != Nature.Random)
+        if (encounter is IFixedNature fixedNature && fixedNature.Nature.IsFixed())
             pk.StatNature = pk.Nature = fixedNature.Nature;
 
         if (encounter is IFixedIVSet fixedIV && fixedIV.IVs.IsSpecified)
@@ -2235,16 +2226,7 @@ public partial class Gen9aSeedFinderForm : Form
     private bool CheckPokemonMatchesCriteria(PA9 pk, EncounterCriteria criteria, IVRange[] ivRanges, ScaleRange scaleRange)
     {
         // Check shiny
-        bool matchesShiny = criteria.Shiny switch
-        {
-            Shiny.Never => !pk.IsShiny,
-            Shiny.Always => pk.IsShiny,
-            Shiny.AlwaysSquare => pk.IsShiny && pk.ShinyXor == 0,
-            Shiny.AlwaysStar => pk.IsShiny && pk.ShinyXor > 0 && pk.ShinyXor < 16,
-            _ => true
-        };
-
-        if (!matchesShiny)
+        if (criteria.IsSpecifiedShiny() && !criteria.IsSatisfiedShiny(ShinyUtil.GetShinyXor(pk.PID, pk.ID32), 16))
             return false;
 
         // Check gender
@@ -2252,7 +2234,7 @@ public partial class Gen9aSeedFinderForm : Form
             return false;
 
         // Check nature
-        if (criteria.Nature != Nature.Random && pk.Nature != criteria.Nature)
+        if (criteria.Nature.IsFixed() && pk.Nature != criteria.Nature)
             return false;
 
         // Check IVs
